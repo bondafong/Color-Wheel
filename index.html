@@ -90,6 +90,65 @@
   button.action.secondary { background: var(--panel); border: 1px solid var(--border); color: var(--text); }
   button.action:hover { opacity: 0.9; }
 
+  /* Paint suggestions section */
+  .paint-section { max-width: 1200px; margin: 16px auto 0; }
+  .section-title { margin: 0 0 6px; font-weight: 400; font-size: 18px; }
+  .paint-color-block {
+    margin-bottom: 22px; padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .paint-color-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .paint-color-header {
+    display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
+  }
+  .paint-color-chip {
+    width: 44px; height: 44px; border-radius: 8px; flex-shrink: 0;
+    border: 1px solid var(--border);
+  }
+  .paint-color-meta { flex: 1; }
+  .paint-color-meta .role {
+    color: var(--muted); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 2px;
+  }
+  .paint-color-meta .hex { font-family: ui-monospace, Menlo, monospace; font-size: 14px; }
+
+  .paint-types { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 760px) { .paint-types { grid-template-columns: 1fr; } }
+  .paint-type-col h4 {
+    font-size: 11px; color: var(--muted); margin: 0 0 8px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .paint-rows { display: flex; flex-direction: column; gap: 6px; }
+  .paint-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 6px; cursor: pointer;
+    background: rgba(255,255,255,0.02);
+    transition: background 0.1s;
+  }
+  .paint-row:hover { background: rgba(255,255,255,0.06); }
+  .paint-chip {
+    width: 32px; height: 32px; border-radius: 4px; flex-shrink: 0;
+    border: 1px solid var(--border);
+  }
+  .paint-info { flex: 1; min-width: 0; }
+  .paint-info .brand {
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .paint-info .pname {
+    font-size: 13px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .paint-info .phex {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
+  .paint-deltae {
+    font-size: 10px; color: var(--muted); flex-shrink: 0;
+    padding: 2px 6px; border: 1px solid var(--border); border-radius: 3px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+
   .toast {
     position: fixed; bottom: 24px; left: 50%;
     transform: translateX(-50%) translateY(20px);
@@ -143,6 +202,12 @@
   </div>
 </div>
 
+<div class="panel paint-section">
+  <h2 class="section-title">Paint Suggestions</h2>
+  <p class="scheme-desc">Closest matches across Citadel, Vallejo, Army Painter, and Reaper, split between regular acrylic and contrast/speed paint ranges. Matched perceptually using Lab color distance (ΔE — lower is closer; under 5 is generally a very good match). Hex values are approximations of the painted finish — verify with a physical swatch where possible. Click a paint to copy its name.</p>
+  <div id="paintGrid"></div>
+</div>
+
 <div class="toast" id="toast">Copied!</div>
 
 <script>
@@ -178,6 +243,10 @@ function hslToRgb(h,s,l) {
   return [Math.round((r+m)*255), Math.round((g+m)*255), Math.round((b+m)*255)];
 }
 function rgbToHex(r,g,b){ const h=n=>n.toString(16).padStart(2,'0'); return '#'+h(r)+h(g)+h(b); }
+function hexToRgb(hex){
+  const m = hex.replace('#','').match(/.{2}/g);
+  return m.map(x => parseInt(x, 16));
+}
 function rybColor(angle,sat,lit){
   const rgbHue = rybToRgbHue(angle);
   const [r,g,b] = hslToRgb(rgbHue, sat, lit);
@@ -188,6 +257,217 @@ function luminance([r,g,b]){
   return 0.2126*a[0] + 0.7152*a[1] + 0.0722*a[2];
 }
 function isLight(rgb){ return luminance(rgb) > 0.5; }
+
+// ---- Lab color matching ----
+function rgb2lab(rgb){
+  let [r,g,b] = rgb.map(v => v/255);
+  [r,g,b] = [r,g,b].map(v => v > 0.04045 ? Math.pow((v+0.055)/1.055, 2.4) : v/12.92);
+  const x = (r*0.4124 + g*0.3576 + b*0.1805) * 100;
+  const y = (r*0.2126 + g*0.7152 + b*0.0722) * 100;
+  const z = (r*0.0193 + g*0.1192 + b*0.9505) * 100;
+  const Xn=95.047, Yn=100, Zn=108.883;
+  const f = t => t > 0.008856 ? Math.pow(t, 1/3) : (7.787*t + 16/116);
+  const fx=f(x/Xn), fy=f(y/Yn), fz=f(z/Zn);
+  return [116*fy - 16, 500*(fx-fy), 200*(fy-fz)];
+}
+function deltaE(a, b){
+  const dl=a[0]-b[0], da=a[1]-b[1], db=a[2]-b[2];
+  return Math.sqrt(dl*dl + da*da + db*db);
+}
+
+// ---- Paint database ----
+// Hex values are approximations of painted-finish swatches.
+const PAINTS = {
+  Citadel: {
+    acrylic: [
+      {n:'Mephiston Red', h:'#9a1115'}, {n:'Khorne Red', h:'#5b1a1f'},
+      {n:'Wazdakka Red', h:'#b3251c'}, {n:'Wild Rider Red', h:'#d12c2f'},
+      {n:'Evil Sunz Scarlet', h:'#c92e1f'}, {n:'Jokaero Orange', h:'#d6602c'},
+      {n:'Troll Slayer Orange', h:'#e26d2b'}, {n:'Fire Dragon Bright', h:'#e88c44'},
+      {n:'Averland Sunset', h:'#b07419'}, {n:'Yriel Yellow', h:'#fbb118'},
+      {n:'Flash Gitz Yellow', h:'#f9d633'}, {n:'Caliban Green', h:'#214b36'},
+      {n:'Warpstone Glow', h:'#22772d'}, {n:'Moot Green', h:'#66c93f'},
+      {n:'Warboss Green', h:'#389932'}, {n:'Loren Forest', h:'#6f7e44'},
+      {n:'Death World Forest', h:'#6b6b3f'}, {n:'Stegadon Scale Green', h:'#1d4145'},
+      {n:'Sotek Green', h:'#1f8a8a'}, {n:'Temple Guard Blue', h:'#4cbcb4'},
+      {n:'Macragge Blue', h:'#1d375a'}, {n:'Caledor Sky', h:'#2156a8'},
+      {n:'Hoeth Blue', h:'#5e93cd'}, {n:'Lothern Blue', h:'#82c5d4'},
+      {n:'Teclis Blue', h:'#2dabd5'}, {n:'Kantor Blue', h:'#1c2640'},
+      {n:'Naggaroth Night', h:'#3d2349'}, {n:'Xereus Purple', h:'#6f2d6c'},
+      {n:'Genestealer Purple', h:'#c074a3'}, {n:'Screamer Pink', h:'#762339'},
+      {n:'Pink Horror', h:'#c25c8c'}, {n:"Emperor's Children", h:'#d2298c'},
+      {n:"Bugman's Glow", h:'#82433b'}, {n:'Cadian Fleshtone', h:'#b5836a'},
+      {n:'Kislev Flesh', h:'#d5a37e'}, {n:'Flayed One Flesh', h:'#e9c4a0'},
+      {n:'Rakarth Flesh', h:'#b8a487'}, {n:'Wraithbone', h:'#d8c89c'},
+      {n:'Ushabti Bone', h:'#cbb27a'}, {n:'Screaming Skull', h:'#d8c694'},
+      {n:'Pallid Wych Flesh', h:'#e3dab7'}, {n:'Zandri Dust', h:'#b09a73'},
+      {n:'Karak Stone', h:'#b59875'}, {n:'Tallarn Sand', h:'#a07c54'},
+      {n:'Skrag Brown', h:'#8a4f1e'}, {n:'Mournfang Brown', h:'#6c3a1d'},
+      {n:'XV-88', h:'#6f4216'}, {n:'Steel Legion Drab', h:'#74553e'},
+      {n:'Rhinox Hide', h:'#4b2a1c'}, {n:'Dryad Bark', h:'#2f221a'},
+      {n:'Doombull Brown', h:'#5a2e22'}, {n:'Abaddon Black', h:'#1a1a1a'},
+      {n:'Eshin Grey', h:'#393b3c'}, {n:'Mechanicus Standard Grey', h:'#4d5051'},
+      {n:'Dawnstone', h:'#6e7375'}, {n:'Administratum Grey', h:'#9da2a4'},
+      {n:'Ulthuan Grey', h:'#d5dadb'}, {n:'White Scar', h:'#e8e8e8'},
+      {n:'The Fang', h:'#485670'}, {n:'Russ Grey', h:'#6b8aa7'},
+      {n:'Fenrisian Grey', h:'#97b6cf'}, {n:'Retributor Armour', h:'#bb8f48'},
+      {n:'Auric Armour Gold', h:'#c79b50'}, {n:'Leadbelcher', h:'#65696b'},
+      {n:'Ironbreaker', h:'#919699'}
+    ],
+    contrast: [
+      {n:'Blood Angels Red', h:'#a01919'}, {n:'Flesh Tearers Red', h:'#791518'},
+      {n:'Volupus Pink', h:'#a91a52'}, {n:'Magos Purple', h:'#682a64'},
+      {n:'Shyish Purple', h:'#3a2046'}, {n:'Black Templar', h:'#1f1f24'},
+      {n:'Basilicanum Grey', h:'#444a4d'}, {n:'Space Wolves Grey', h:'#6f8aa0'},
+      {n:'Akhelian Green', h:'#1b605b'}, {n:'Terradon Turquoise', h:'#2c8d99'},
+      {n:'Aethermatic Blue', h:'#216a9c'}, {n:'Talassar Blue', h:'#1a3e75'},
+      {n:'Leviadon Blue', h:'#193958'}, {n:'Ultramarines Blue', h:'#26498d'},
+      {n:'Plaguebearer Flesh', h:'#a09e3c'}, {n:'Militarum Green', h:'#3d693a'},
+      {n:'Ork Flesh', h:'#5a8b3d'}, {n:'Warp Lightning', h:'#8ec236'},
+      {n:'Creed Camo', h:'#807a3d'}, {n:'Iyanden Yellow', h:'#dfae22'},
+      {n:'Imperial Fist', h:'#eebf2b'}, {n:'Bad Moon Yellow', h:'#e9c429'},
+      {n:'Magmadroth Flame', h:'#df6b18'}, {n:'Gryph-charger Grey', h:'#b9b9b6'},
+      {n:'Apothecary White', h:'#dad8c9'}, {n:'Aggaros Dunes', h:'#a07a3c'},
+      {n:'Snakebite Leather', h:'#7a4624'}, {n:'Cygor Brown', h:'#5e3a1f'},
+      {n:'Wyldwood', h:'#3a2417'}, {n:'Gore-Grunta Fur', h:'#4f2d1a'},
+      {n:'Skeleton Horde', h:'#bca16d'}, {n:'Guilliman Flesh', h:'#c79976'},
+      {n:'Darkoath Flesh', h:'#a26d4c'}, {n:'Fyreslayer Flesh', h:'#bf6d3a'},
+      {n:'Gryph-hound Orange', h:'#cb6a25'}
+    ]
+  },
+  Vallejo: {
+    acrylic: [
+      {n:'Bloody Red', h:'#b22020'}, {n:'Hot Red', h:'#c8231d'},
+      {n:'Scarlet Red', h:'#d52a16'}, {n:'Squid Pink', h:'#b1394e'},
+      {n:'Heavy Red', h:'#7a1e1c'}, {n:'Hot Orange', h:'#de4d12'},
+      {n:'Orange Fire', h:'#e26b1f'}, {n:'Sun Yellow', h:'#f7c800'},
+      {n:'Gold Yellow', h:'#d8b314'}, {n:'Moon Yellow', h:'#f0d72b'},
+      {n:'Goblin Green', h:'#5a9c3b'}, {n:'Scorpy Green', h:'#b3ce3d'},
+      {n:'Sick Green', h:'#6da039'}, {n:'Jade Green', h:'#38a785'},
+      {n:'Foul Green', h:'#4ab06b'}, {n:'Dark Green', h:'#1f4a30'},
+      {n:'Imperial Blue', h:'#1a3f7d'}, {n:'Magic Blue', h:'#1759a8'},
+      {n:'Ultramarine Blue', h:'#3060b8'}, {n:'Electric Blue', h:'#1d8ac8'},
+      {n:'Stormy Blue', h:'#3e5165'}, {n:'Royal Purple', h:'#4a2670'},
+      {n:'Hexed Lichen', h:'#6e3f7e'}, {n:'Warlord Purple', h:'#3c1c4a'},
+      {n:'Beasty Brown', h:'#5c3a25'}, {n:'Earth', h:'#6f4d2c'},
+      {n:'Khaki', h:'#806d4f'}, {n:'Plague Brown', h:'#835230'},
+      {n:'Chocolate Brown', h:'#3e2316'}, {n:'Charred Brown', h:'#3b261d'},
+      {n:'Bonewhite', h:'#cbb589'}, {n:'Dwarf Skin', h:'#b08665'},
+      {n:'Pale Flesh', h:'#ddc09a'}, {n:'Elf Skin Tone', h:'#bf9163'},
+      {n:'Dead Flesh', h:'#c2b78a'}, {n:'Heavy Charcoal', h:'#393c3c'},
+      {n:'Charcoal', h:'#4f5455'}, {n:'Wolf Grey', h:'#6e7d8d'},
+      {n:'Stonewall Grey', h:'#899194'}, {n:'Ghost Grey', h:'#b6c3c5'},
+      {n:'Black', h:'#161616'}, {n:'Dead White', h:'#ececec'},
+      {n:'Glorious Gold', h:'#c1933a'}, {n:'Brassy Brass', h:'#ad8543'},
+      {n:'Tinny Tin', h:'#785a3a'}, {n:'Gunmetal Grey', h:'#4f5560'}
+    ],
+    contrast: [
+      {n:'Wagram Red', h:'#9c1a1c'}, {n:'Templar Red', h:'#a92a23'},
+      {n:'Burnt Red', h:'#80211b'}, {n:'Demonic Red', h:'#7d2118'},
+      {n:'Plasma Pink', h:'#d4598c'}, {n:'Heretic Purple', h:'#683977'},
+      {n:'Mystic Purple', h:'#583066'}, {n:'Mediterranean Blue', h:'#275a8d'},
+      {n:'Storm Blue', h:'#1c4e7c'}, {n:'Templar Blue', h:'#1f3f72'},
+      {n:'Imperial Yellow', h:'#e5b41a'}, {n:'Caribbean Sand', h:'#d2b886'},
+      {n:'Greasy Bone', h:'#c5b384'}, {n:'Necropolis Bone', h:'#c8b287'},
+      {n:'Templar White', h:'#cfc8b0'}, {n:'Aragon Green', h:'#355c43'},
+      {n:'Snake Green', h:'#7da34a'}, {n:'Algae Green', h:'#4f9c66'},
+      {n:'Spectral Green', h:'#57a070'}, {n:'Black Lotus', h:'#1a1f2c'},
+      {n:'Tortoise Skin', h:'#93623a'}, {n:'Dwarven Gold', h:'#b07e2c'},
+      {n:'Dwarven Skin', h:'#b78360'}, {n:'Elven Skin', h:'#dfb78a'},
+      {n:'Orc Skin', h:'#7d8946'}, {n:'Karst Stone', h:'#7a7677'},
+      {n:'Whisper Grey', h:'#6e6e6e'}
+    ]
+  },
+  'Army Painter': {
+    acrylic: [
+      {n:'Pure Red', h:'#c61f1c'}, {n:'Dragon Red', h:'#9b1c14'},
+      {n:'Chaotic Red', h:'#a92a25'}, {n:'Toxic Mist', h:'#a3c742'},
+      {n:'Goblin Green', h:'#557d3a'}, {n:'Greenskin', h:'#5e9847'},
+      {n:'Angel Green', h:'#2f7841'}, {n:'Hydra Turquoise', h:'#1f6a83'},
+      {n:'Crystal Blue', h:'#2c81b7'}, {n:'Ultramarine Blue', h:'#2f5fa6'},
+      {n:'Deep Blue', h:'#1d3979'}, {n:'Necromancer Cloak', h:'#1a1c2a'},
+      {n:'Tundra Blue', h:'#80a4c2'}, {n:'Daemonic Yellow', h:'#fac82a'},
+      {n:'Lava Orange', h:'#d65b1e'}, {n:'Skeleton Bone', h:'#cdb47e'},
+      {n:'Necrotic Flesh', h:'#b8b780'}, {n:'Tainted Gold', h:'#9d7a36'},
+      {n:'Barbarian Flesh', h:'#c08560'}, {n:'Tanned Flesh', h:'#a16648'},
+      {n:'Wolf Grey', h:'#818d97'}, {n:'Uniform Grey', h:'#5b6164'},
+      {n:'Ash Grey', h:'#a3a8a8'}, {n:'Matt Black', h:'#1a1a1a'},
+      {n:'Matt White', h:'#ededed'}, {n:'Oak Brown', h:'#6f4321'},
+      {n:'Leather Brown', h:'#874f29'}, {n:'Monster Brown', h:'#3a2218'},
+      {n:'Bright Gold', h:'#c79b3d'}, {n:'Weapon Bronze', h:'#ab7335'},
+      {n:'Plate Mail Metal', h:'#83898b'}, {n:'Gun Metal', h:'#4e565a'},
+      {n:'Royal Purple', h:'#4a2872'}, {n:'Oozing Purple', h:'#33214a'},
+      {n:'Pink Horror', h:'#d05892'}, {n:'Daemonette Hide', h:'#9a78a0'},
+      {n:'Dirty Down Rust', h:'#8a4a25'}, {n:'Strong Tone', h:'#3b261b'},
+      {n:'Combat Fatigues', h:'#6a6c4b'}, {n:'Army Green', h:'#5b6f3c'},
+      {n:'Field Grey', h:'#7d827a'}
+    ],
+    contrast: [
+      {n:'Blood Red (Speedpaint)', h:'#99231d'}, {n:'Slaughter Red', h:'#c12a23'},
+      {n:'Pure Red (Speedpaint)', h:'#c8221d'}, {n:'Pallid Bone', h:'#cab788'},
+      {n:'Holy White', h:'#e2dfd4'}, {n:'Crusader Skin', h:'#d59f73'},
+      {n:'Highlord Blue', h:'#305b97'}, {n:'Magic Blue (Speedpaint)', h:'#2378b6'},
+      {n:'Thunderous Blue', h:'#1d3d6f'}, {n:'Runic Cobalt', h:'#1d4d80'},
+      {n:'Hive Dweller Purple', h:'#5b3978'}, {n:'Plasmatic Bolt', h:'#d44389'},
+      {n:'Moss Green', h:'#5e8146'}, {n:'Goblin Green (Speedpaint)', h:'#5e8c43'},
+      {n:'Forest Green', h:'#2f5b3b'}, {n:'Camo Cloak', h:'#6c7747'},
+      {n:'Dark Wood', h:'#6b3a1b'}, {n:'Cultist Robe', h:'#774a30'},
+      {n:'Sand Golem', h:'#bf9c5a'}, {n:'Imperial Fist Yellow', h:'#e6b531'},
+      {n:'Zealot Yellow', h:'#f5c84e'}, {n:'Hydra Turquoise (Speedpaint)', h:'#2a7e91'},
+      {n:'Orc Skin (Speedpaint)', h:'#6b8a3a'}, {n:'Skeleton Horde (Speedpaint)', h:'#b89766'},
+      {n:'Dragon Red (Speedpaint)', h:'#931e1a'}, {n:'Galaxy Greatcoat', h:'#1e2a4e'},
+      {n:'Shadowed Stone', h:'#5a625e'}, {n:'Talisman Teal', h:'#2c7077'},
+      {n:'Inquisitor Black', h:'#161618'}, {n:'Tongue Pink', h:'#c46881'}
+    ]
+  },
+  Reaper: {
+    acrylic: [
+      {n:'Pure Red', h:'#c61f1d'}, {n:'Fire Red', h:'#d52e1f'},
+      {n:'Carnage Red', h:'#9b1c19'}, {n:'Brilliant Red', h:'#d8221d'},
+      {n:'Holiday Red', h:'#b8231b'}, {n:'Rusty Red', h:'#8a3c1d'},
+      {n:'Pumpkin Orange', h:'#d96920'}, {n:'Lemon Yellow', h:'#f7e150'},
+      {n:'Sun Yellow', h:'#f1c12c'}, {n:'Pale Saffron', h:'#efb957'},
+      {n:'Pure Black', h:'#161616'}, {n:'Solid Black', h:'#1a1a1a'},
+      {n:'Pure White', h:'#ededed'}, {n:'Linen White', h:'#d6cdb1'},
+      {n:'Stormy Grey', h:'#707a7d'}, {n:'Misty Grey', h:'#9aa0a3'},
+      {n:'Cloudy Grey', h:'#b8babc'}, {n:'Walnut Brown', h:'#5c3722'},
+      {n:'Earth Brown', h:'#6e4628'}, {n:'Saddle Brown', h:'#7a4f2c'},
+      {n:'Tanned Skin', h:'#c39c75'}, {n:'Tanned Leather', h:'#9c6a3e'},
+      {n:'Bone Shadow', h:'#94855e'}, {n:'Yellowed Bone', h:'#cbb288'},
+      {n:'Aged Bone', h:'#d3c08b'}, {n:'Polished Bone', h:'#d8c994'},
+      {n:'Vampiric Skin', h:'#f5dcc4'}, {n:'Bloodless Skin', h:'#dcc6b4'},
+      {n:'Highlight Skin', h:'#dca687'}, {n:'Brown Liner', h:'#3e2418'},
+      {n:'Blue Liner', h:'#1a223a'}, {n:'Sapphire Blue', h:'#1a4f97'},
+      {n:'Marine Teal', h:'#2f7e8a'}, {n:'Templar Blue', h:'#3056a0'},
+      {n:'Dragon Black', h:'#15182a'}, {n:'Twilight Blue', h:'#1f2d56'},
+      {n:'True Blue', h:'#2362b9'}, {n:'Imperial Purple', h:'#3f2a64'},
+      {n:'Royal Purple', h:'#5d3475'}, {n:'Amethyst Purple', h:'#7e4d8f'},
+      {n:'Forest Green', h:'#2f5b30'}, {n:'Deep Forest Green', h:'#1d3e22'},
+      {n:'Pine Green', h:'#356144'}, {n:'Jade Green', h:'#3a8a6c'},
+      {n:'Viper Green', h:'#5da648'}, {n:'Living Steel', h:'#a5acaf'},
+      {n:'Honed Steel', h:'#828a8d'}, {n:'New Gold', h:'#caa44a'},
+      {n:'Antique Gold', h:'#a07e36'}, {n:'Ancient Bronze', h:'#7e5a30'}
+    ],
+    contrast: []  // Reaper does not have a dedicated contrast/speed range
+  }
+};
+
+// Pre-compute Lab values for fast matching
+Object.values(PAINTS).forEach(brand => {
+  Object.values(brand).forEach(list => {
+    list.forEach(p => { p.rgb = hexToRgb(p.h); p.lab = rgb2lab(p.rgb); });
+  });
+});
+
+function findClosest(targetLab, list){
+  if (!list.length) return null;
+  let best = list[0], bestD = deltaE(targetLab, list[0].lab);
+  for (let i=1; i<list.length; i++){
+    const d = deltaE(targetLab, list[i].lab);
+    if (d < bestD) { best = list[i]; bestD = d; }
+  }
+  return { paint: best, deltaE: bestD };
+}
 
 // ---- Wheel drawing ----
 const canvas = document.getElementById('wheel');
@@ -207,12 +487,10 @@ function drawWheel(sat, lit, baseAngle){
     ctx.fillStyle = rybColor(a, sat, lit).hex;
     ctx.fill();
   }
-  // inner cut-out
   ctx.beginPath();
   ctx.arc(cx,cy,innerR,0,Math.PI*2);
   ctx.fillStyle = '#242424';
   ctx.fill();
-  // primary/secondary letters
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '12px sans-serif';
   ctx.textAlign = 'center';
@@ -222,7 +500,6 @@ function drawWheel(sat, lit, baseAngle){
     const r = innerR - 24;
     ctx.fillText(t, cx+Math.cos(ang)*r, cy+Math.sin(ang)*r);
   });
-  // marker on chosen angle
   if (baseAngle != null){
     const ang = (baseAngle-90)*Math.PI/180;
     const mx = cx + Math.cos(ang)*(innerR + (outerR-innerR)/2);
@@ -352,6 +629,83 @@ function colorOf(item){
   return rybColor(item.angle, sat, lit);
 }
 
+function renderPaintSuggestions(items){
+  const grid = $('paintGrid');
+  grid.innerHTML = '';
+
+  items.forEach(it => {
+    const col = colorOf(it);
+    const targetLab = rgb2lab(col.rgb);
+
+    const block = document.createElement('div');
+    block.className = 'paint-color-block';
+
+    const header = document.createElement('div');
+    header.className = 'paint-color-header';
+    header.innerHTML = `
+      <div class="paint-color-chip" style="background:${col.hex}"></div>
+      <div class="paint-color-meta">
+        <div class="role">${it.role}</div>
+        <div class="hex">${col.hex.toUpperCase()}</div>
+      </div>
+    `;
+    block.appendChild(header);
+
+    const types = document.createElement('div');
+    types.className = 'paint-types';
+
+    ['acrylic', 'contrast'].forEach(type => {
+      const col2 = document.createElement('div');
+      col2.className = 'paint-type-col';
+      const title = document.createElement('h4');
+      title.textContent = type === 'acrylic' ? 'Regular acrylic' : 'Contrast / Speed paint';
+      col2.appendChild(title);
+
+      const rows = document.createElement('div');
+      rows.className = 'paint-rows';
+
+      Object.entries(PAINTS).forEach(([brand, ranges]) => {
+        const list = ranges[type] || [];
+        const match = findClosest(targetLab, list);
+        if (!match) {
+          const row = document.createElement('div');
+          row.className = 'paint-row';
+          row.style.opacity = '0.5';
+          row.style.cursor = 'default';
+          row.innerHTML = `
+            <div class="paint-chip" style="background:#2a2a2a"></div>
+            <div class="paint-info">
+              <div class="brand">${brand}</div>
+              <div class="pname" style="color:var(--muted); font-style:italic;">No range available</div>
+            </div>
+          `;
+          rows.appendChild(row);
+          return;
+        }
+        const row = document.createElement('div');
+        row.className = 'paint-row';
+        row.innerHTML = `
+          <div class="paint-chip" style="background:${match.paint.h}"></div>
+          <div class="paint-info">
+            <div class="brand">${brand}</div>
+            <div class="pname">${match.paint.n}</div>
+            <div class="phex">${match.paint.h.toUpperCase()}</div>
+          </div>
+          <div class="paint-deltae" title="ΔE Lab color distance — lower is closer">ΔE ${match.deltaE.toFixed(1)}</div>
+        `;
+        row.onclick = () => copyText(`${brand} – ${match.paint.n} (${match.paint.h.toUpperCase()})`);
+        rows.appendChild(row);
+      });
+
+      col2.appendChild(rows);
+      types.appendChild(col2);
+    });
+
+    block.appendChild(types);
+    grid.appendChild(block);
+  });
+}
+
 function render(){
   drawWheel(state.sat, state.lit, state.angle);
   const base = rybColor(state.angle, state.sat, state.lit);
@@ -377,6 +731,8 @@ function render(){
     div.onclick = () => copyText(col.hex.toUpperCase());
     pal.appendChild(div);
   });
+
+  renderPaintSuggestions(items);
 }
 
 // ---- Toast / copy ----
@@ -385,10 +741,10 @@ function showToast(msg){
   toast.textContent = msg;
   toast.classList.add('show');
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toast.classList.remove('show'), 1400);
+  showToast._t = setTimeout(() => toast.classList.remove('show'), 1600);
 }
 function copyText(t){
-  if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => showToast('Copied  ' + t));
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => showToast('Copied  ' + (t.length > 50 ? t.slice(0,47)+'…' : t)));
   else showToast(t);
 }
 
