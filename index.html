@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Miniature Color Palette Creator</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --panel: #242424;
+    --border: #3a3a3a;
+    --text: #e8e8e8;
+    --muted: #8b8b8b;
+    --accent: #d4a373;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-weight: 300; letter-spacing: 0.3px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; font-size: 14px; max-width: 720px; }
+  .container {
+    display: grid;
+    grid-template-columns: minmax(380px, 440px) 1fr;
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  @media (max-width: 820px) { .container { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .wheel-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  canvas#wheel { cursor: crosshair; border-radius: 50%; background: transparent; touch-action: none; }
+  .sliders { width: 100%; }
+  .slider-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+  .slider-row label { width: 90px; font-size: 13px; color: var(--muted); }
+  .slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+  .slider-row .val { width: 42px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+
+  .selected-color { display: flex; flex-direction: column; gap: 12px; }
+  .swatch-big { width: 100%; height: 130px; border-radius: 8px; border: 1px solid var(--border); }
+  .info-row { display: flex; justify-content: space-between; font-family: ui-monospace, Menlo, monospace; font-size: 14px; }
+  .info-row span:first-child { color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  .tabs { display: flex; gap: 6px; margin: 28px auto 12px; flex-wrap: wrap; max-width: 1200px; }
+  .tab {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    transition: all 0.15s; font-family: inherit;
+  }
+  .tab:hover { background: #2e2e2e; }
+  .tab.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 500; }
+
+  .scheme-panel { max-width: 1200px; margin: 0 auto; }
+  .scheme-desc { color: var(--muted); font-size: 13px; margin-bottom: 16px; line-height: 1.55; }
+  .palette { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .swatch {
+    height: 100px; border-radius: 8px; cursor: pointer; position: relative;
+    display: flex; align-items: flex-end; padding: 12px;
+    transition: transform 0.15s; border: 1px solid rgba(0,0,0,0.2);
+  }
+  .swatch:hover { transform: translateY(-2px); }
+  .swatch .label {
+    background: rgba(0,0,0,0.6); color: #fff; padding: 4px 8px;
+    border-radius: 4px; font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+  }
+  .swatch.light .label { background: rgba(255,255,255,0.85); color: #000; }
+  .swatch .role {
+    position: absolute; top: 8px; left: 12px; right: 12px;
+    background: rgba(0,0,0,0.55); color: #fff; padding: 2px 8px;
+    border-radius: 3px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.4px; text-align: center;
+  }
+  .swatch.light .role { background: rgba(255,255,255,0.75); color: #000; }
+
+  .actions { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button.action {
+    background: var(--accent); color: #1a1a1a; border: none;
+    padding: 9px 16px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; font-weight: 500; font-family: inherit;
+  }
+  button.action.secondary { background: var(--panel); border: 1px solid var(--border); color: var(--text); }
+  button.action:hover { opacity: 0.9; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--accent); color: #1a1a1a;
+    padding: 10px 20px; border-radius: 6px;
+    opacity: 0; transition: all 0.2s; pointer-events: none;
+    font-size: 14px; font-weight: 500;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<h1>Miniature Color Palette Creator</h1>
+<p class="subtitle">A classical artist's (RYB) color wheel — complementary pairs follow traditional painting logic (red↔green, blue↔orange, yellow↔purple). Click the wheel to pick a base color, then choose a harmony scheme below.</p>
+
+<div class="container">
+  <div class="panel wheel-wrap">
+    <canvas id="wheel" width="360" height="360"></canvas>
+    <div class="sliders">
+      <div class="slider-row">
+        <label>Saturation</label>
+        <input id="sat" type="range" min="0" max="100" value="80">
+        <span class="val" id="satVal">80</span>
+      </div>
+      <div class="slider-row">
+        <label>Lightness</label>
+        <input id="lit" type="range" min="10" max="90" value="50">
+        <span class="val" id="litVal">50</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel selected-color">
+    <div class="swatch-big" id="bigSwatch"></div>
+    <div class="info-row"><span>HEX</span><span id="hexVal">#000000</span></div>
+    <div class="info-row"><span>RGB</span><span id="rgbVal">0, 0, 0</span></div>
+    <div class="info-row"><span>RYB angle</span><span id="hslVal">0°</span></div>
+    <div class="hint">Click any swatch in the palette below to copy its hex code. The wheel itself updates with your saturation/lightness so you can preview a tonal range before picking.</div>
+  </div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="panel scheme-panel">
+  <div class="scheme-desc" id="schemeDesc"></div>
+  <div class="palette" id="palette"></div>
+  <div class="actions">
+    <button class="action" id="copyAll">Copy all hex codes</button>
+    <button class="action secondary" id="exportPng">Download palette as PNG</button>
+  </div>
+</div>
+
+<div class="toast" id="toast">Copied!</div>
+
+<script>
+// ---- Artist (RYB) wheel ↔ RGB hue mapping (Itten-style) ----
+const RYB_TO_RGB = [
+  [0,0],[15,9],[30,18],[45,26],[60,35],[75,48],[90,55],[105,58],[120,60],
+  [135,80],[150,100],[165,115],[180,120],[195,160],[210,200],[225,220],[240,240],
+  [255,255],[270,270],[285,280],[300,290],[315,310],[330,330],[345,345],[360,360]
+];
+function rybToRgbHue(angle) {
+  angle = ((angle % 360) + 360) % 360;
+  for (let i=0; i<RYB_TO_RGB.length-1; i++) {
+    const [a0,h0] = RYB_TO_RGB[i], [a1,h1] = RYB_TO_RGB[i+1];
+    if (angle >= a0 && angle <= a1) {
+      const t = (angle - a0) / (a1 - a0);
+      return h0 + t*(h1 - h0);
+    }
+  }
+  return angle;
+}
+function hslToRgb(h,s,l) {
+  s/=100; l/=100;
+  const c = (1 - Math.abs(2*l-1)) * s;
+  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+  const m = l - c/2;
+  let r=0,g=0,b=0;
+  if (h<60)       [r,g,b]=[c,x,0];
+  else if (h<120) [r,g,b]=[x,c,0];
+  else if (h<180) [r,g,b]=[0,c,x];
+  else if (h<240) [r,g,b]=[0,x,c];
+  else if (h<300) [r,g,b]=[x,0,c];
+  else            [r,g,b]=[c,0,x];
+  return [Math.round((r+m)*255), Math.round((g+m)*255), Math.round((b+m)*255)];
+}
+function rgbToHex(r,g,b){ const h=n=>n.toString(16).padStart(2,'0'); return '#'+h(r)+h(g)+h(b); }
+function rybColor(angle,sat,lit){
+  const rgbHue = rybToRgbHue(angle);
+  const [r,g,b] = hslToRgb(rgbHue, sat, lit);
+  return { hex: rgbToHex(r,g,b), rgb: [r,g,b] };
+}
+function luminance([r,g,b]){
+  const a = [r,g,b].map(v=>{ v/=255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); });
+  return 0.2126*a[0] + 0.7152*a[1] + 0.0722*a[2];
+}
+function isLight(rgb){ return luminance(rgb) > 0.5; }
+
+// ---- Wheel drawing ----
+const canvas = document.getElementById('wheel');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, cx = W/2, cy = H/2;
+const outerR = W/2 - 6, innerR = 70;
+
+function drawWheel(sat, lit, baseAngle){
+  ctx.clearRect(0,0,W,H);
+  for (let a=0; a<360; a++){
+    const start = (a-90-0.55)*Math.PI/180;
+    const end   = (a-90+0.55)*Math.PI/180;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,outerR,start,end);
+    ctx.closePath();
+    ctx.fillStyle = rybColor(a, sat, lit).hex;
+    ctx.fill();
+  }
+  // inner cut-out
+  ctx.beginPath();
+  ctx.arc(cx,cy,innerR,0,Math.PI*2);
+  ctx.fillStyle = '#242424';
+  ctx.fill();
+  // primary/secondary letters
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  [['R',0],['O',60],['Y',120],['G',180],['B',240],['P',300]].forEach(([t,a])=>{
+    const ang = (a-90)*Math.PI/180;
+    const r = innerR - 24;
+    ctx.fillText(t, cx+Math.cos(ang)*r, cy+Math.sin(ang)*r);
+  });
+  // marker on chosen angle
+  if (baseAngle != null){
+    const ang = (baseAngle-90)*Math.PI/180;
+    const mx = cx + Math.cos(ang)*(innerR + (outerR-innerR)/2);
+    const my = cy + Math.sin(ang)*(innerR + (outerR-innerR)/2);
+    ctx.beginPath();
+    ctx.arc(mx,my,10,0,Math.PI*2);
+    ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#000'; ctx.stroke();
+  }
+}
+
+// ---- State ----
+const state = { angle: 210, sat: 75, lit: 50, scheme: '60-30-10' };
+
+const $ = id => document.getElementById(id);
+const satIn = $('sat'), litIn = $('lit'), satVal = $('satVal'), litVal = $('litVal');
+satIn.oninput = () => { state.sat = +satIn.value; satVal.textContent = state.sat; render(); };
+litIn.oninput = () => { state.lit = +litIn.value; litVal.textContent = state.lit; render(); };
+satIn.value = state.sat; litIn.value = state.lit; satVal.textContent = state.sat; litVal.textContent = state.lit;
+
+function pickFromEvent(e){
+  const rect = canvas.getBoundingClientRect();
+  const px = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  const py = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+  const x = px*(W/rect.width)  - cx;
+  const y = py*(H/rect.height) - cy;
+  const r = Math.sqrt(x*x + y*y);
+  if (r < innerR-5 || r > outerR+5) return;
+  let angle = Math.atan2(y,x)*180/Math.PI + 90;
+  if (angle < 0) angle += 360;
+  state.angle = angle;
+  render();
+}
+canvas.addEventListener('click', pickFromEvent);
+let dragging = false;
+canvas.addEventListener('mousedown', e => { dragging = true; pickFromEvent(e); });
+window.addEventListener('mousemove', e => { if (dragging) pickFromEvent(e); });
+window.addEventListener('mouseup',   () => dragging = false);
+canvas.addEventListener('touchstart', e => { e.preventDefault(); pickFromEvent(e); }, {passive:false});
+canvas.addEventListener('touchmove',  e => { e.preventDefault(); pickFromEvent(e); }, {passive:false});
+
+// ---- Schemes ----
+const schemes = {
+  '60-30-10': {
+    label: '60 / 30 / 10',
+    desc: '60% dominant base, 30% supporting (analogous neighbour), 10% accent (the complementary opposite). The classic interior-design rule — perfect for unifying a miniature without losing focal punch. Use the base on the largest area (e.g. cloak), the support on secondary areas (armour), the accent for jewels/eyes/sashes.',
+    build: a => [
+      { role: '60% Base',    angle: a },
+      { role: '30% Support', angle: a + 30, lit: state.lit + 8 },
+      { role: '10% Accent',  angle: a + 180, sat: Math.min(100, state.sat + 15) }
+    ]
+  },
+  'triad': {
+    label: 'Triad',
+    desc: 'Three colors evenly spaced 120° apart. Vibrant, balanced, and dynamic — great for heroic-style minis with clear focal points. Let one color dominate and use the other two as accents.',
+    build: a => [
+      { role: 'Base',    angle: a },
+      { role: 'Triad 2', angle: a + 120 },
+      { role: 'Triad 3', angle: a + 240 }
+    ]
+  },
+  'complementary': {
+    label: 'Complementary',
+    desc: 'Direct opposites on the wheel. Maximum contrast — ideal for shadow tones (mix opposites for natural, neutralised darks rather than just adding black) and high-impact accents. Two-color schemes look bold but read clearly.',
+    build: a => [
+      { role: 'Base',       angle: a },
+      { role: 'Complement', angle: a + 180 }
+    ]
+  },
+  'split': {
+    label: 'Split-Complementary',
+    desc: 'Base plus the two colors flanking its complement. Strong contrast like complementary, but less harsh — easier to balance on a single mini. A safe but interesting three-color scheme.',
+    build: a => [
+      { role: 'Base',    angle: a },
+      { role: 'Split 1', angle: a + 150 },
+      { role: 'Split 2', angle: a + 210 }
+    ]
+  },
+  'analogous': {
+    label: 'Analogous',
+    desc: 'Three neighbouring colors. Harmonious and naturalistic — the go-to scheme for skin, leather, foliage, NMM gold, and earthy schemes. Add a complementary accent in tiny amounts if it feels too uniform.',
+    build: a => [
+      { role: '−30°', angle: a - 30 },
+      { role: 'Base', angle: a },
+      { role: '+30°', angle: a + 30 }
+    ]
+  },
+  'tetradic': {
+    label: 'Tetradic (Square)',
+    desc: 'Four colors evenly spaced 90° apart. Rich and varied — best when one color dominates and the others support, e.g. armour + cloak + trim + base. Tricky to balance; pick a clear hierarchy.',
+    build: a => [
+      { role: 'Base',  angle: a },
+      { role: '+90°',  angle: a + 90 },
+      { role: '+180°', angle: a + 180 },
+      { role: '+270°', angle: a + 270 }
+    ]
+  },
+  'ladder': {
+    label: 'Highlight / Shadow Ladder',
+    desc: 'Layering ladder from your base color. Use the dark end for recess shades, the mid for the basecoat, and the light end for sharp edge highlights. Saturation drops slightly at the extremes — warmer mid, cooler edges feels natural.',
+    build: a => {
+      const lits = [12, 25, 38, state.lit, 65, 78, 90];
+      const labels = ['Deep shade','Shade','Midshade','Base','Midhighlight','Highlight','Edge'];
+      return lits.map((L,i) => ({
+        role: labels[i],
+        angle: a,
+        lit: L,
+        sat: Math.max(20, state.sat - Math.abs(L-state.lit)*0.35)
+      }));
+    }
+  }
+};
+
+// ---- Tabs ----
+const tabsEl = $('tabs');
+Object.entries(schemes).forEach(([key, s]) => {
+  const b = document.createElement('button');
+  b.className = 'tab'; b.textContent = s.label; b.dataset.key = key;
+  b.onclick = () => { state.scheme = key; render(); };
+  tabsEl.appendChild(b);
+});
+
+// ---- Render ----
+function colorOf(item){
+  const sat = item.sat ?? state.sat;
+  const lit = Math.max(5, Math.min(95, item.lit ?? state.lit));
+  return rybColor(item.angle, sat, lit);
+}
+
+function render(){
+  drawWheel(state.sat, state.lit, state.angle);
+  const base = rybColor(state.angle, state.sat, state.lit);
+  $('bigSwatch').style.background = base.hex;
+  $('hexVal').textContent = base.hex.toUpperCase();
+  $('rgbVal').textContent = base.rgb.join(', ');
+  $('hslVal').textContent = `${state.angle.toFixed(0)}°`;
+
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.key === state.scheme));
+
+  const scheme = schemes[state.scheme];
+  $('schemeDesc').textContent = scheme.desc;
+  const items = scheme.build(state.angle);
+  const pal = $('palette');
+  pal.innerHTML = '';
+  items.forEach(it => {
+    const col = colorOf(it);
+    const div = document.createElement('div');
+    div.className = 'swatch' + (isLight(col.rgb) ? ' light' : '');
+    div.style.background = col.hex;
+    div.innerHTML = `<div class="role">${it.role}</div><div class="label">${col.hex.toUpperCase()}</div>`;
+    div.onclick = () => copyText(col.hex.toUpperCase());
+    pal.appendChild(div);
+  });
+}
+
+// ---- Toast / copy ----
+const toast = $('toast');
+function showToast(msg){
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => toast.classList.remove('show'), 1400);
+}
+function copyText(t){
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => showToast('Copied  ' + t));
+  else showToast(t);
+}
+
+$('copyAll').onclick = () => {
+  const items = schemes[state.scheme].build(state.angle);
+  copyText(items.map(it => colorOf(it).hex.toUpperCase()).join('   '));
+};
+
+$('exportPng').onclick = () => {
+  const items = schemes[state.scheme].build(state.angle);
+  const cols = items.length;
+  const w = 200, h = 240, pad = 40;
+  const can = document.createElement('canvas');
+  can.width = w*cols + pad*2;
+  can.height = h + pad*2 + 30;
+  const c = can.getContext('2d');
+  c.fillStyle = '#1a1a1a';
+  c.fillRect(0,0,can.width,can.height);
+  c.fillStyle = '#e8e8e8';
+  c.font = 'bold 22px sans-serif';
+  c.fillText(schemes[state.scheme].label + ' palette', pad, pad);
+  items.forEach((it, i) => {
+    const col = colorOf(it);
+    const x = pad + i*w;
+    c.fillStyle = '#888';
+    c.font = '12px sans-serif';
+    c.fillText(it.role, x+8, pad+30);
+    c.fillStyle = col.hex;
+    c.fillRect(x+5, pad+40, w-10, h-60);
+    c.fillStyle = '#e8e8e8';
+    c.font = 'bold 16px ui-monospace, Menlo, monospace';
+    c.fillText(col.hex.toUpperCase(), x+8, pad+h);
+  });
+  const link = document.createElement('a');
+  link.download = `palette-${schemes[state.scheme].label.replace(/[^a-z0-9]/gi,'_')}.png`;
+  link.href = can.toDataURL('image/png');
+  link.click();
+};
+
+render();
+</script>
+</body>
+</html>
