@@ -270,9 +270,50 @@ function rgb2lab(rgb){
   const fx=f(x/Xn), fy=f(y/Yn), fz=f(z/Zn);
   return [116*fy - 16, 500*(fx-fy), 200*(fy-fz)];
 }
-function deltaE(a, b){
-  const dl=a[0]-b[0], da=a[1]-b[1], db=a[2]-b[2];
-  return Math.sqrt(dl*dl + da*da + db*db);
+function deltaE(lab1, lab2){
+  // CIEDE2000 — perceptually accurate ΔE with a hue-rotation correction
+  // around the blue/purple region, so saturated electric blues don't get
+  // matched to purples the way naive Euclidean Lab distance does.
+  const [L1,a1,b1] = lab1, [L2,a2,b2] = lab2;
+  const C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2);
+  const Cbar = (C1 + C2) / 2;
+  const G = 0.5 * (1 - Math.sqrt(Math.pow(Cbar,7) / (Math.pow(Cbar,7) + Math.pow(25,7))));
+  const a1p = a1*(1+G), a2p = a2*(1+G);
+  const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
+  const h1p = (Math.atan2(b1, a1p)*180/Math.PI + 360) % 360;
+  const h2p = (Math.atan2(b2, a2p)*180/Math.PI + 360) % 360;
+  const dLp = L2 - L1;
+  const dCp = C2p - C1p;
+  let dhp;
+  if (C1p*C2p === 0) dhp = 0;
+  else if (Math.abs(h2p - h1p) <= 180) dhp = h2p - h1p;
+  else if (h2p - h1p > 180) dhp = h2p - h1p - 360;
+  else dhp = h2p - h1p + 360;
+  const dHp = 2 * Math.sqrt(C1p*C2p) * Math.sin(dhp*Math.PI/360);
+  const Lbarp = (L1 + L2) / 2;
+  const Cbarp = (C1p + C2p) / 2;
+  let hbarp;
+  if (C1p*C2p === 0) hbarp = h1p + h2p;
+  else if (Math.abs(h1p - h2p) <= 180) hbarp = (h1p + h2p) / 2;
+  else if (h1p + h2p < 360) hbarp = (h1p + h2p + 360) / 2;
+  else hbarp = (h1p + h2p - 360) / 2;
+  const T = 1
+    - 0.17 * Math.cos((hbarp - 30) * Math.PI/180)
+    + 0.24 * Math.cos((2*hbarp) * Math.PI/180)
+    + 0.32 * Math.cos((3*hbarp + 6) * Math.PI/180)
+    - 0.20 * Math.cos((4*hbarp - 63) * Math.PI/180);
+  const dTheta = 30 * Math.exp(-Math.pow((hbarp - 275)/25, 2));
+  const Rc = 2 * Math.sqrt(Math.pow(Cbarp,7) / (Math.pow(Cbarp,7) + Math.pow(25,7)));
+  const Sl = 1 + (0.015 * Math.pow(Lbarp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbarp - 50, 2));
+  const Sc = 1 + 0.045 * Cbarp;
+  const Sh = 1 + 0.015 * Cbarp * T;
+  const Rt = -Math.sin(2 * dTheta * Math.PI/180) * Rc;
+  return Math.sqrt(
+    Math.pow(dLp/Sl, 2) +
+    Math.pow(dCp/Sc, 2) +
+    Math.pow(dHp/Sh, 2) +
+    Rt * (dCp/Sc) * (dHp/Sh)
+  );
 }
 
 // ---- Paint database ----
@@ -627,220 +668,184 @@ const PAINTS = {
     ],
     "contrast": [
       {
-        "n": "Black Templar",
-        "h": "#2a2a2a"
-      },
-      {
-        "n": "Basilicanum Grey",
-        "h": "#7a7a7a"
-      },
-      {
-        "n": "Blue Ink",
-        "h": "#1a3d5a"
+        "n": "Akhelian Green",
+        "h": "#1f5d52"
       },
       {
         "n": "Aethermatic Blue",
-        "h": "#2a6a9b"
+        "h": "#1c5a8c"
       },
       {
-        "n": "Akhelian Green",
-        "h": "#3d7a6b"
+        "n": "Aggaros Dunes",
+        "h": "#b07738"
       },
       {
         "n": "Apothecary White",
-        "h": "#f0f0f0"
+        "h": "#ddd8c8"
       },
       {
-        "n": "Bloodhunter Red",
-        "h": "#8b1a1a"
+        "n": "Bad Moon Yellow",
+        "h": "#e3b71a"
       },
       {
-        "n": "Bonebreaker Brown",
-        "h": "#7a5a4a"
+        "n": "Basilicanum Grey",
+        "h": "#4d4d52"
       },
       {
-        "n": "Bridgehaunt Brown",
-        "h": "#6b4a3a"
+        "n": "Black Legion",
+        "h": "#2a2a30"
       },
       {
-        "n": "Caledor Sky",
-        "h": "#2a6a9b"
+        "n": "Black Templar",
+        "h": "#1f1d20"
       },
       {
-        "n": "Cadian Castellan",
-        "h": "#4a6b2a"
+        "n": "Blood Angels Red",
+        "h": "#921616"
       },
       {
-        "n": "Carroburg Crimson",
-        "h": "#9a1a1a"
+        "n": "Creed Camo",
+        "h": "#7b743c"
       },
       {
         "n": "Cygor Brown",
-        "h": "#6b4a2a"
+        "h": "#5e3a1b"
+      },
+      {
+        "n": "Dark Angels Green",
+        "h": "#1f4632"
       },
       {
         "n": "Darkoath Flesh",
-        "h": "#9a6b4a"
+        "h": "#a36c47"
       },
       {
-        "n": "Darktide Purple",
-        "h": "#5a3d7a"
+        "n": "Flesh Tearers Red",
+        "h": "#791519"
       },
       {
-        "n": "Dryad Green",
-        "h": "#3d6b4a"
+        "n": "Fyreslayer Flesh",
+        "h": "#c9663a"
       },
       {
-        "n": "Garaghak Yellow",
-        "h": "#d4a530"
+        "n": "Gore-grunta Fur",
+        "h": "#4f2a1a"
       },
       {
-        "n": "Gryph-Charger Grey",
-        "h": "#8b8b8b"
+        "n": "Gryph-charger Grey",
+        "h": "#adb0a8"
       },
       {
-        "n": "Haruspex Purple",
-        "h": "#6b3d8b"
+        "n": "Gryph-hound Orange",
+        "h": "#c66925"
       },
       {
-        "n": "Hollow King Brown",
-        "h": "#5a4a3a"
+        "n": "Guilliman Flesh",
+        "h": "#c79179"
+      },
+      {
+        "n": "Imperial Fist",
+        "h": "#e8b524"
       },
       {
         "n": "Iyanden Yellow",
-        "h": "#f4c842"
+        "h": "#e6a91d"
       },
       {
-        "n": "Junglers Green",
-        "h": "#4a7a5a"
+        "n": "Karandras Green",
+        "h": "#2f6b3c"
       },
       {
-        "n": "Kabalite Green",
-        "h": "#2d5a4a"
+        "n": "Kroxigor Scales",
+        "h": "#2c4a3f"
       },
       {
-        "n": "Karandras Purple",
-        "h": "#7a4d9b"
-      },
-      {
-        "n": "Kasrkin Yellow",
-        "h": "#e8b820"
-      },
-      {
-        "n": "Khorne Red",
-        "h": "#c21c1c"
-      },
-      {
-        "n": "Kugrathi Green",
-        "h": "#3d6b5a"
-      },
-      {
-        "n": "Loxatl Orange",
-        "h": "#d45a2a"
+        "n": "Leviadon Blue",
+        "h": "#194062"
       },
       {
         "n": "Magmadroth Flame",
-        "h": "#d45a2a"
+        "h": "#d96a25"
       },
       {
-        "n": "Mantis Warrior Green",
-        "h": "#4a8a5a"
+        "n": "Magos Purple",
+        "h": "#5c2362"
       },
       {
-        "n": "Marax Red",
-        "h": "#9a3a2a"
-      },
-      {
-        "n": "Medusa Purple",
-        "h": "#4a3d6b"
-      },
-      {
-        "n": "Morghast Bone",
-        "h": "#e0cfc9"
+        "n": "Militarum Green",
+        "h": "#3d6b3a"
       },
       {
         "n": "Nazdreg Yellow",
-        "h": "#f5c842"
+        "h": "#c89e1f"
       },
       {
-        "n": "Nighthaunt Purple",
-        "h": "#5a3d7a"
+        "n": "Nighthaunt Gloom",
+        "h": "#2e4554"
       },
       {
-        "n": "Nullification Robes",
-        "h": "#6b7a8b"
+        "n": "Ork Flesh",
+        "h": "#547a3a"
       },
       {
-        "n": "Nurgle Rot",
-        "h": "#6b8b5a"
-      },
-      {
-        "n": "Obsidian Black",
-        "h": "#1a1a1a"
-      },
-      {
-        "n": "Outrider Red",
-        "h": "#b03a2a"
-      },
-      {
-        "n": "Plaguebearer Slime",
-        "h": "#7a9b6b"
+        "n": "Plaguebearer Flesh",
+        "h": "#9b9d3c"
       },
       {
         "n": "Pteraxii Flesh",
-        "h": "#c9a88b"
+        "h": "#c8a585"
       },
       {
-        "n": "Pyrite Pink",
-        "h": "#d48ba0"
-      },
-      {
-        "n": "Ratskin Flesh",
-        "h": "#a89b7a"
-      },
-      {
-        "n": "Rakarth Flesh",
-        "h": "#d9bfb0"
-      },
-      {
-        "n": "Skeleton Horde",
-        "h": "#d9c89b"
-      },
-      {
-        "n": "Space Wolves Grey",
-        "h": "#5a7a8b"
-      },
-      {
-        "n": "Stained Crimson",
-        "h": "#8b3a3a"
-      },
-      {
-        "n": "Stonewall Grey",
-        "h": "#6b7a7a"
-      },
-      {
-        "n": "Teclis Blue",
-        "h": "#4a8cc7"
-      },
-      {
-        "n": "Thunderhawk Blue",
-        "h": "#4a6a7b"
-      },
-      {
-        "n": "Ward's Sapphire",
-        "h": "#3d6a9b"
-      },
-      {
-        "n": "Iyoneth Yellow",
-        "h": "#f5d420"
+        "n": "Pylar Glacier",
+        "h": "#b8d3dc"
       },
       {
         "n": "Shyish Purple",
-        "h": "#6b4a8b"
+        "h": "#38234a"
       },
       {
-        "n": "Typhon Teal",
-        "h": "#3d8b8b"
+        "n": "Skeleton Horde",
+        "h": "#b29765"
+      },
+      {
+        "n": "Snakebite Leather",
+        "h": "#794620"
+      },
+      {
+        "n": "Space Wolves Grey",
+        "h": "#6c8aa3"
+      },
+      {
+        "n": "Striking Scorpion Green",
+        "h": "#2e8458"
+      },
+      {
+        "n": "Talassar Blue",
+        "h": "#1d3f72"
+      },
+      {
+        "n": "Terradon Turquoise",
+        "h": "#207688"
+      },
+      {
+        "n": "Tesseract Glow",
+        "h": "#a4d56b"
+      },
+      {
+        "n": "Ultramarines Blue",
+        "h": "#1f4684"
+      },
+      {
+        "n": "Volupus Pink",
+        "h": "#a8205a"
+      },
+      {
+        "n": "Warp Lightning",
+        "h": "#87b630"
+      },
+      {
+        "n": "Wyldwood",
+        "h": "#382414"
       }
     ]
   },
@@ -2309,6 +2314,255 @@ const PAINTS = {
       {
         "n": "Molten Metal",
         "h": "#9a8a7a"
+      }
+    ],
+    "contrast": []
+  },
+  "Pro Acryl": {
+    "acrylic": [
+      {
+        "n": "Bold Titanium White",
+        "h": "#f5f5f5"
+      },
+      {
+        "n": "Bright Ivory",
+        "h": "#f0e8d8"
+      },
+      {
+        "n": "Ivory",
+        "h": "#e8dcc4"
+      },
+      {
+        "n": "Tan Flesh",
+        "h": "#e0bfa0"
+      },
+      {
+        "n": "Coal Black",
+        "h": "#1a1a1a"
+      },
+      {
+        "n": "Pure Black",
+        "h": "#161616"
+      },
+      {
+        "n": "Bold Pyrrole Red",
+        "h": "#d93429"
+      },
+      {
+        "n": "Bright Red",
+        "h": "#d62920"
+      },
+      {
+        "n": "Crimson",
+        "h": "#a8201a"
+      },
+      {
+        "n": "Burnt Red",
+        "h": "#8b1a1a"
+      },
+      {
+        "n": "Mahogany",
+        "h": "#5a3324"
+      },
+      {
+        "n": "Coral",
+        "h": "#e87b69"
+      },
+      {
+        "n": "Bold Coral",
+        "h": "#ec6957"
+      },
+      {
+        "n": "Pure Magenta",
+        "h": "#b32168"
+      },
+      {
+        "n": "Magenta",
+        "h": "#c0297a"
+      },
+      {
+        "n": "Light Pink",
+        "h": "#f5b5c8"
+      },
+      {
+        "n": "Bold Pyrrole Yellow",
+        "h": "#f4d420"
+      },
+      {
+        "n": "Golden Yellow",
+        "h": "#f0c020"
+      },
+      {
+        "n": "Pure Yellow",
+        "h": "#f5d62c"
+      },
+      {
+        "n": "Bright Yellow",
+        "h": "#f5e042"
+      },
+      {
+        "n": "Pale Yellow",
+        "h": "#f7e8a0"
+      },
+      {
+        "n": "Orange",
+        "h": "#ed8228"
+      },
+      {
+        "n": "Burnt Orange",
+        "h": "#cc6420"
+      },
+      {
+        "n": "Bold Pyrrole Orange",
+        "h": "#e96a25"
+      },
+      {
+        "n": "Bold Phthalo Green",
+        "h": "#137857"
+      },
+      {
+        "n": "Hooker's Green",
+        "h": "#2c5239"
+      },
+      {
+        "n": "Pure Green",
+        "h": "#2e7c3a"
+      },
+      {
+        "n": "Bright Green",
+        "h": "#54aa50"
+      },
+      {
+        "n": "Olive Green",
+        "h": "#5a6a39"
+      },
+      {
+        "n": "Camo Green",
+        "h": "#5d6b48"
+      },
+      {
+        "n": "Sap Green",
+        "h": "#4a6e2c"
+      },
+      {
+        "n": "Jade",
+        "h": "#2f9b7e"
+      },
+      {
+        "n": "Pale Green",
+        "h": "#a8d4a4"
+      },
+      {
+        "n": "Bold Cobalt Blue",
+        "h": "#1a3e8c"
+      },
+      {
+        "n": "Bold Phthalo Blue",
+        "h": "#1c4d8e"
+      },
+      {
+        "n": "Bold Cerulean",
+        "h": "#2d6ba8"
+      },
+      {
+        "n": "Cool Blue",
+        "h": "#234d7a"
+      },
+      {
+        "n": "Faded Ultramarine",
+        "h": "#436e9c"
+      },
+      {
+        "n": "Sky Blue",
+        "h": "#6ab0d4"
+      },
+      {
+        "n": "Dark Grey Blue",
+        "h": "#3a4d5b"
+      },
+      {
+        "n": "Pale Blue",
+        "h": "#a4c9dd"
+      },
+      {
+        "n": "Phthalo Cyan",
+        "h": "#2096b8"
+      },
+      {
+        "n": "Phthalo Turquoise",
+        "h": "#1f8c98"
+      },
+      {
+        "n": "Royal Purple",
+        "h": "#5a3a8b"
+      },
+      {
+        "n": "Purple",
+        "h": "#6e3c95"
+      },
+      {
+        "n": "Bold Lavender",
+        "h": "#9978c0"
+      },
+      {
+        "n": "Light Umber",
+        "h": "#8a6841"
+      },
+      {
+        "n": "Dark Umber",
+        "h": "#4d3826"
+      },
+      {
+        "n": "Golden Brown",
+        "h": "#a06b35"
+      },
+      {
+        "n": "Burnt Umber",
+        "h": "#4a2f1f"
+      },
+      {
+        "n": "Raw Umber",
+        "h": "#5a4633"
+      },
+      {
+        "n": "Burnt Sienna",
+        "h": "#8a4327"
+      },
+      {
+        "n": "Raw Sienna",
+        "h": "#b07a3c"
+      },
+      {
+        "n": "Sepia",
+        "h": "#4d3320"
+      },
+      {
+        "n": "Bright Warm Grey",
+        "h": "#b3a89e"
+      },
+      {
+        "n": "Dark Warm Grey",
+        "h": "#67615a"
+      },
+      {
+        "n": "Bright Cool Grey",
+        "h": "#b0b6b8"
+      },
+      {
+        "n": "Dark Cool Grey",
+        "h": "#585e62"
+      },
+      {
+        "n": "Pale Flesh",
+        "h": "#f3d2b9"
+      },
+      {
+        "n": "Mid Skin Tone",
+        "h": "#c79670"
+      },
+      {
+        "n": "Dark Skin Tone",
+        "h": "#6a4a35"
       }
     ],
     "contrast": []
